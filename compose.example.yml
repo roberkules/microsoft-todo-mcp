@@ -1,0 +1,31 @@
+services:
+  todo-mcp:
+    build: .
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      MS_TODO_HTTP_HOST: 0.0.0.0
+      MS_TODO_HTTP_PUBLIC_URL: ${MS_TODO_HTTP_PUBLIC_URL:?Set the public HTTPS URL ending in /mcp}
+      MS_TODO_OAUTH_ISSUER: ${MS_TODO_OAUTH_ISSUER:?Set the OAuth issuer}
+      MS_TODO_OAUTH_JWKS_URL: ${MS_TODO_OAUTH_JWKS_URL:?Set the HTTPS public signing keys URL}
+      MS_TODO_OAUTH_SUBJECT: ${MS_TODO_OAUTH_SUBJECT:?Set the single allowed subject}
+      MS_TODO_OAUTH_SCOPE: ${MS_TODO_OAUTH_SCOPE:-todo:mcp}
+      MS_TODO_CLIENT_ID: ${MS_TODO_CLIENT_ID:?Set a dedicated Microsoft public client ID}
+      MS_TODO_AUTHORITY: ${MS_TODO_AUTHORITY:-https://login.microsoftonline.com/common}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

@@ -17,7 +17,7 @@ import { VERSION } from "./version";
 
 const IDEMPOTENCY_TTL_MS = 60_000;
 
-export async function runServer(config: AppConfig = loadConfig()): Promise<void> {
+export async function createServerFactory(config: AppConfig = loadConfig()): Promise<() => McpServer> {
   const logger = createLogger(config.logLevel);
 
   // A missing client id is a config problem, not a crash: start the server anyway and let
@@ -37,6 +37,12 @@ export async function runServer(config: AppConfig = loadConfig()): Promise<void>
     idempotency: new IdempotencyCache(systemClock, IDEMPOTENCY_TTL_MS),
   };
 
+  return () => createToolServer(config, ctx);
+}
+
+/** Each HTTP request gets its own protocol instance; auth and Graph state are shared. */
+export function createToolServer(config: AppConfig, ctx: ToolContext): McpServer {
+  const logger = ctx.logger;
   const server = new McpServer({ name: "microsoft-todo-mcp", version: VERSION });
 
   let registered = 0;
@@ -71,6 +77,11 @@ export async function runServer(config: AppConfig = loadConfig()): Promise<void>
     scopeReadonly: config.scopeReadonly,
   });
 
-  await server.connect(new StdioServerTransport());
+  return server;
+}
+
+export async function runServer(config: AppConfig = loadConfig()): Promise<void> {
+  const createServer = await createServerFactory(config);
+  await createServer().connect(new StdioServerTransport());
   // The stdio transport keeps the event loop alive; the process exits when stdin closes.
 }

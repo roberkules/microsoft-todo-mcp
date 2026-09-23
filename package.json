@@ -46,7 +46,8 @@
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "jose": "^6.2.12",
     "zod": "^3.23.8"
   },
   "devDependencies": {

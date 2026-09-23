@@ -7,3 +7,7 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Private Docker token cache
+/data/
+/compose.yml

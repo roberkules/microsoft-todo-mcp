@@ -111,3 +111,10 @@ Architecture and design rationale: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md
 ## License
 
 MIT © Fabien Butz
+
+## Remote Streamable HTTP
+
+Stdio remains the default. Use `microsoft-todo-mcp serve --http` for authenticated,
+single-owner Streamable HTTP. This requires a configured OAuth authorization
+server and HTTPS proxy/tunnel; it never starts as an anonymous public endpoint.
+See [HTTP setup and Docker deployment](docs/HTTP.md).

@@ -4,6 +4,9 @@ import { runServer } from "./server";
 import { acquireByDeviceCode, createPca, getCachedAccount } from "./auth/device-code";
 import { clearCache } from "./auth/token-cache";
 import { toAppError } from "./graph/errors";
+import { startHttpServer } from "./http/server";
+import { loadHttpConfig } from "./http/config";
+import { createServerFactory } from "./server";
 import { VERSION } from "./version";
 
 interface ParsedArgs {
@@ -41,6 +44,7 @@ Usage:
   microsoft-todo-mcp --version    Print version
 
 Flags (serve):
+  --http             Serve authenticated Streamable HTTP (see docs/HTTP.md)
   --readonly         Disable all write and destructive tools
   --no-destructive   Disable destructive (delete) tools only
   --scope-readonly   Request only the Tasks.Read scope (requires re-login)
@@ -69,7 +73,18 @@ async function main(): Promise<void> {
 
   switch (cmd) {
     case "serve":
-      await runServer(config);
+      if (flags.has("http")) {
+        const httpConfig = loadHttpConfig(process.env);
+        const server = await startHttpServer(httpConfig, await createServerFactory(config), logger);
+        const shutdown = () => {
+          const deadline = setTimeout(() => process.exit(1), 10_000).unref();
+          server.close(() => { clearTimeout(deadline); process.exit(0); });
+        };
+        process.once("SIGINT", shutdown);
+        process.once("SIGTERM", shutdown);
+      } else {
+        await runServer(config);
+      }
       return;
 
     case "login": {
