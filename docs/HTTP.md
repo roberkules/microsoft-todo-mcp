@@ -13,10 +13,13 @@ allowlisted OAuth subject. Do not use it as a multi-user service.
    MSAL also requests identity/offline-access scopes. No client secret or
    Microsoft password is stored. The shared Graph CLI identity can have other
    previously consented permissions, so it is not an isolated permission boundary.
-2. MCP: configure an existing OAuth authorization server, then set the variables
-   below. HTTP mode verifies its RS256/ES256 JWT access tokens using `jose`.
-   Signature, issuer, audience, expiry, required scope, and exact subject are
-   checked on every `/mcp` request. Graph access tokens are **not** MCP credentials.
+2. MCP: use either an existing OAuth authorization server that issues JWTs, or
+   Cloudflare Access Managed OAuth. HTTP mode verifies signed JWTs using `jose`
+   on every `/mcp` request. With Cloudflare, the JWT is the assertion forwarded
+   to the origin after Access validates ChatGPT's opaque OAuth token. Graph
+   access tokens are **not** MCP credentials.
+
+### Direct JWT authorization (default)
 
 | Variable | Value |
 | --- | --- |
@@ -49,6 +52,34 @@ OAuth discovery is available at `/.well-known/oauth-protected-resource/mcp`
 403. This supports remote clients such as ChatGPT when an appropriate authorization
 server has been configured. A URL alone is not sufficient setup.
 
+### Cloudflare Access Managed OAuth
+
+Set `MS_TODO_HTTP_AUTH_MODE=cloudflare-access` and configure:
+
+| Variable | Value |
+| --- | --- |
+| `MS_TODO_HTTP_PUBLIC_URL` | Canonical HTTPS MCP URL, ending in `/mcp` |
+| `MS_TODO_CF_ACCESS_ISSUER` | Exact team URL, e.g. `https://myteam.cloudflareaccess.com` |
+| `MS_TODO_CF_ACCESS_AUD` | The dedicated Access application's 32-character AUD tag |
+| `MS_TODO_CF_ACCESS_EMAIL` | The single owner's email address as verified by the Access IdP |
+
+Create a dedicated self-hosted Access application for the MCP hostname with an
+allow policy limited to the owner, then enable Managed OAuth. Use the exact
+ChatGPT redirect URI displayed for this MCP connection in Access's allowed
+redirect URIs. Access handles OAuth discovery, client registration, PKCE, token
+refresh, and the login page; the origin does not advertise its own OAuth server
+in this mode. A Google identity provider or Cloudflare email PIN can provide the
+interactive login. The Microsoft Graph device-code login remains separate.
+
+Access passes a signed `Cf-Access-Jwt-Assertion` header to the origin after it
+validates ChatGPT's opaque bearer token. The server verifies the assertion's
+signature, Access team issuer, application AUD, validity window, application
+type, and exact owner email. It ignores the client-supplied `Authorization`
+header in this mode. Requests without a valid assertion fail closed. Keep the
+origin reachable only through the tunnel/private network; never expose port
+8000 directly to the Internet. Cloudflare's OAuth metadata and challenges are
+served at the edge, so the origin's OAuth metadata paths return 404 in this mode.
+
 ## Transport and proxy configuration
 
 `POST /mcp` implements stateless Streamable HTTP using the official MCP SDK and
@@ -69,7 +100,10 @@ plain HTTP and must remain on loopback or a private container network.
 The example uses a pinned Node 24 LTS patch. Set `NODE_VERSION` at build time to
 update the base intentionally. Pin the built image by digest for production.
 Copy `compose.example.yml` to `compose.yml`, configure the variables above in a
-local `.env` (ignored by Git), and create the token directory before startup:
+local `.env` (ignored by Git), and create the token directory before startup.
+For Cloudflare Access mode, replace the `MS_TODO_OAUTH_*` variables in the
+example service with `MS_TODO_HTTP_AUTH_MODE` and the three `MS_TODO_CF_ACCESS_*`
+variables above. The image already sets `MS_TODO_TOKEN_CACHE=/data/token-cache.json`.
 
 ```sh
 mkdir -m 700 data

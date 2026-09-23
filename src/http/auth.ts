@@ -1,12 +1,12 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
-import type { HttpConfig } from "./config";
+import type { CloudflareHttpConfig, JwtHttpConfig } from "./config";
 
 export class HttpAuthError extends Error {
   constructor(readonly status: 401 | 403) { super("MCP authorization failed"); }
 }
 
 /** The single allowed subject owns the single Microsoft token cache. */
-export function createTokenVerifier(config: HttpConfig, keys: JWTVerifyGetKey = createRemoteJWKSet(config.jwksUrl)) {
+export function createTokenVerifier(config: JwtHttpConfig, keys: JWTVerifyGetKey = createRemoteJWKSet(config.jwksUrl)) {
   return async (token: string): Promise<void> => {
     let payload;
     try {
@@ -21,5 +21,29 @@ export function createTokenVerifier(config: HttpConfig, keys: JWTVerifyGetKey = 
     }
     if (payload.sub !== config.subject) throw new HttpAuthError(403);
     if (typeof payload.scope !== "string" || !payload.scope.split(" ").includes(config.scope)) throw new HttpAuthError(403);
+  };
+}
+
+/** Access resolves ChatGPT's opaque OAuth token and signs this origin assertion. */
+export function createCloudflareAccessVerifier(
+  config: CloudflareHttpConfig,
+  keys: JWTVerifyGetKey = createRemoteJWKSet(config.jwksUrl),
+) {
+  return async (assertion: string): Promise<void> => {
+    let payload;
+    try {
+      ({ payload } = await jwtVerify(assertion, keys, {
+        issuer: config.issuer,
+        audience: config.audience,
+        algorithms: ["RS256"],
+        requiredClaims: ["exp", "sub", "iat", "nbf"],
+      }));
+    } catch {
+      throw new HttpAuthError(401);
+    }
+    if (payload.type !== "app" || typeof payload.sub !== "string" || !payload.sub ||
+        typeof payload.email !== "string" || payload.email.toLowerCase() !== config.ownerEmail) {
+      throw new HttpAuthError(403);
+    }
   };
 }

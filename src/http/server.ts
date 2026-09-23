@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Logger } from "../lib/logger";
 import type { HttpConfig } from "./config";
-import { createTokenVerifier, HttpAuthError } from "./auth";
+import { createCloudflareAccessVerifier, createTokenVerifier, HttpAuthError } from "./auth";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS = 32;
@@ -17,7 +17,8 @@ export function createHttpServer(
   config: HttpConfig,
   createMcpServer: () => McpServer,
   logger: Logger,
-  verifyToken: (token: string) => Promise<void> = createTokenVerifier(config),
+  verifyToken: (token: string) => Promise<void> = config.authMode === "jwt"
+    ? createTokenVerifier(config) : createCloudflareAccessVerifier(config),
 ) {
   let active = 0;
   const metadataPath = "/.well-known/oauth-protected-resource/mcp";
@@ -35,7 +36,7 @@ export function createHttpServer(
     if (req.url === "/healthz" && req.method === "GET") {
       json(res, 200, { status: "ok" }); return;
     }
-    if ([metadataPath, "/.well-known/oauth-protected-resource"].includes(req.url ?? "") && req.method === "GET") {
+    if (config.authMode === "jwt" && [metadataPath, "/.well-known/oauth-protected-resource"].includes(req.url ?? "") && req.method === "GET") {
       json(res, 200, { resource: config.publicUrl.href, authorization_servers: [config.issuer], scopes_supported: [config.scope], bearer_methods_supported: ["header"] });
       return;
     }
@@ -44,9 +45,11 @@ export function createHttpServer(
     active++;
     let mcp: McpServer | undefined;
     try {
-      const match = /^Bearer ([^\s]+)$/i.exec(req.headers.authorization ?? "");
-      if (!match?.[1]) throw new HttpAuthError(401);
-      await verifyToken(match[1]);
+      const token = config.authMode === "jwt"
+        ? /^Bearer ([^\s]+)$/i.exec(req.headers.authorization ?? "")?.[1]
+        : req.headers["cf-access-jwt-assertion"];
+      if (typeof token !== "string" || !token) throw new HttpAuthError(401);
+      await verifyToken(token);
       // Stateless HTTP has no standalone SSE stream or sessions to delete.
       if (req.method !== "POST") {
         res.setHeader("Allow", "POST"); json(res, 405, { error: "Method not allowed" }); return;
@@ -79,7 +82,10 @@ export function createHttpServer(
     } catch (err) {
       if (!res.headersSent) {
         if (err instanceof HttpAuthError) {
-          res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}", scope="${config.scope}", error="${err.status === 401 ? "invalid_token" : "insufficient_scope"}"`);
+          // In Access mode, Cloudflare owns OAuth discovery and challenges at the edge.
+          if (config.authMode === "jwt") {
+            res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}", scope="${config.scope}", error="${err.status === 401 ? "invalid_token" : "insufficient_scope"}"`);
+          }
           json(res, err.status, { error: "Unauthorized" });
         } else {
           logger.error("HTTP request failed");

@@ -3,7 +3,7 @@ import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createHttpServer } from "../src/http/server";
 import { HttpAuthError } from "../src/http/auth";
-import { loadHttpConfig } from "../src/http/config";
+import { loadHttpConfig, type HttpConfig } from "../src/http/config";
 import { loadConfig } from "../src/config";
 import { createServerFactory } from "../src/server";
 import { createLogger } from "../src/lib/logger";
@@ -21,18 +21,18 @@ afterEach(async () => {
   })));
 });
 
-async function setup(readonly = false) {
+async function setup(readonly = false, httpConfig: HttpConfig = config, validToken = "test-owner") {
   // Empty client ID prevents all Microsoft/cache I/O in these protocol tests.
   const factory = await createServerFactory(loadConfig({ MS_TODO_CLIENT_ID: "", LOG_LEVEL: "silent", MS_TODO_READONLY: readonly ? "1" : "0" }));
-  const server = createHttpServer(config, factory, createLogger("silent"), async (token) => {
-    if (token !== "test-owner") throw new HttpAuthError(401);
+  const server = createHttpServer(httpConfig, factory, createLogger("silent"), async (token) => {
+    if (token !== validToken) throw new HttpAuthError(401);
   });
   servers.push(server);
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const port = (server.address() as AddressInfo).port;
   return (body?: unknown, options: { path?: string; method?: string; headers?: Record<string, string>; raw?: string } = {}) => new Promise<{ status: number; headers: Record<string, unknown>; body: string }>((resolve, reject) => {
     const req = request({ hostname: "127.0.0.1", port, path: options.path ?? "/mcp", method: options.method ?? "POST", headers: {
-      Host: config.publicUrl.host, Authorization: "Bearer test-owner",
+      Host: httpConfig.publicUrl.host, Authorization: "Bearer test-owner",
       Accept: "application/json, text/event-stream", "Content-Type": "application/json",
       ...options.headers,
     } }, (res) => {
@@ -101,5 +101,23 @@ describe("Streamable HTTP", () => {
     expect((await call(undefined, { method: "GET" })).status).toBe(405);
     expect((await call(undefined, { method: "DELETE" })).status).toBe(405);
     expect((await call(undefined, { method: "GET", path: "/healthz" })).status).toBe(200);
+  });
+
+  it("requires the Access assertion header in Cloudflare mode", async () => {
+    const accessConfig = loadHttpConfig({
+      MS_TODO_HTTP_PUBLIC_URL: "https://todo.example.com/mcp",
+      MS_TODO_HTTP_AUTH_MODE: "cloudflare-access",
+      MS_TODO_CF_ACCESS_ISSUER: "https://owner.cloudflareaccess.com",
+      MS_TODO_CF_ACCESS_AUD: "1234567890abcdef1234567890abcdef",
+      MS_TODO_CF_ACCESS_EMAIL: "owner@example.com",
+    });
+    const call = await setup(false, accessConfig, "valid-assertion");
+    const list = rpc("tools/list");
+    const noAssertion = await call(list);
+    expect(noAssertion.status).toBe(401);
+    expect(noAssertion.headers["www-authenticate"]).toBeUndefined();
+    expect((await call(list, { headers: { "Cf-Access-Jwt-Assertion": "invalid" } })).status).toBe(401);
+    expect((await call(list, { headers: { "Cf-Access-Jwt-Assertion": "valid-assertion", Authorization: "" } })).status).toBe(200);
+    expect((await call(undefined, { method: "GET", path: "/.well-known/oauth-protected-resource" })).status).toBe(404);
   });
 });
