@@ -13,7 +13,7 @@ const cloudflareEnv = {
   MS_TODO_HTTP_PUBLIC_URL: "https://todo.example.com/mcp",
   MS_TODO_HTTP_AUTH_MODE: "cloudflare-access",
   MS_TODO_CF_ACCESS_ISSUER: "https://owner.cloudflareaccess.com",
-  MS_TODO_CF_ACCESS_AUD: "1234567890abcdef1234567890abcdef",
+  MS_TODO_CF_ACCESS_AUD: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
   MS_TODO_CF_ACCESS_EMAIL: "owner@example.com",
 };
 

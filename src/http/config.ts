@@ -51,7 +51,7 @@ export function loadHttpConfig(env: NodeJS.ProcessEnv): HttpConfig {
       throw new AppError("config_error", "MS_TODO_CF_ACCESS_ISSUER must be a Cloudflare Access team domain.");
     }
     const audience = required("MS_TODO_CF_ACCESS_AUD");
-    if (!/^[0-9a-f]{32}$/i.test(audience)) throw new AppError("config_error", "Invalid Cloudflare Access application AUD tag.");
+    if (!/^[0-9a-f]{64}$/i.test(audience)) throw new AppError("config_error", "Invalid Cloudflare Access application AUD tag.");
     const ownerEmail = required("MS_TODO_CF_ACCESS_EMAIL").toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) throw new AppError("config_error", "Invalid Cloudflare Access owner email.");
     return {

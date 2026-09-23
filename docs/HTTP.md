@@ -60,7 +60,7 @@ Set `MS_TODO_HTTP_AUTH_MODE=cloudflare-access` and configure:
 | --- | --- |
 | `MS_TODO_HTTP_PUBLIC_URL` | Canonical HTTPS MCP URL, ending in `/mcp` |
 | `MS_TODO_CF_ACCESS_ISSUER` | Exact team URL, e.g. `https://myteam.cloudflareaccess.com` |
-| `MS_TODO_CF_ACCESS_AUD` | The dedicated Access application's 32-character AUD tag |
+| `MS_TODO_CF_ACCESS_AUD` | The dedicated Access application's 64-character AUD tag |
 | `MS_TODO_CF_ACCESS_EMAIL` | The single owner's email address as verified by the Access IdP |
 
 Create a dedicated self-hosted Access application for the MCP hostname with an
