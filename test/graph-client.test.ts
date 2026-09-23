@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { TasksApi } from "../src/todo/tasks";
+import { encodeCursor } from "../src/graph/pagination";
 import { GraphClient } from "../src/graph/client";
 import { createLogger } from "../src/lib/logger";
 import type { AppConfig } from "../src/config";
@@ -24,6 +26,61 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
 }
 
 describe("GraphClient", () => {
+  it.each([
+    "https://example.com/v1.0/me/todo/lists",
+    "http://graph.microsoft.com/v1.0/me/todo/lists",
+    "https://graph.microsoft.com:444/v1.0/me/todo/lists",
+    "https://graph.microsoft.com.example.com/v1.0/me/todo/lists",
+    "https://user:password@graph.microsoft.com/v1.0/me/todo/lists",
+    "https://graph.microsoft.com/v1.0/me/messages",
+    "https://graph.microsoft.com/v1.0/me/todo-other",
+    "https://graph.microsoft.com/v1.0/me/todo/../messages",
+    "https://graph.microsoft.com/v1.0/me/todo/%2e%2e/messages",
+    "https://graph.microsoft.com/v1.0/me/todo/%2e%2e%2fmessages",
+    "https://graph.microsoft.com/v1.0/me/todo/%252e%252e/messages",
+    "https://graph.microsoft.com/v1.0/me/todo/lists#fragment",
+    "not a URL",
+  ])("rejects an unsafe cursor before obtaining credentials: %s", async (url) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const getAccessToken = vi.fn(async () => "secret");
+    const client = new GraphClient({ config, tokens: { ...tokens, getAccessToken }, logger: silent, ids, fetchImpl });
+    await expect(new TasksApi(client, 200).list("list", { cursor: encodeCursor(url) }))
+      .rejects.toMatchObject({ code: "validation_error" });
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("follows valid Graph pagination without altering the continuation query", async () => {
+    const next = "https://graph.microsoft.com/v1.0/me/todo/lists/list/tasks?$skiptoken=a%2Bb%3D";
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse(200, { value: [], "@odata.nextLink": next }))
+      .mockResolvedValueOnce(jsonResponse(200, { value: [] }));
+    const client = new GraphClient({ config, tokens, logger: silent, ids, fetchImpl });
+    await new TasksApi(client, 200).list("list");
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe(next);
+  });
+
+  it("validates server-supplied nextLink values too", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(200, { value: [], "@odata.nextLink": "https://example.com/" }));
+    const client = new GraphClient({ config, tokens, logger: silent, ids, fetchImpl });
+    await expect(new TasksApi(client, 200).list("list")).rejects.toMatchObject({ code: "validation_error" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([301, 302, 303, 307, 308])("does not follow HTTP %s redirects", async (status) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status, headers: { location: "https://example.com/" } }));
+    const client = new GraphClient({ config, tokens, logger: silent, ids, fetchImpl });
+    await expect(client.request("GET", "/me/todo/lists")).rejects.toMatchObject({ code: "graph_error", status });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe("manual");
+  });
+
+  it("supports a configured sovereign Graph origin", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(200, { value: [] }));
+    const client = new GraphClient({ config: { ...config, graphBase: "https://graph.microsoft.us/v1.0" }, tokens, logger: silent, ids, fetchImpl });
+    await client.request("GET", "https://graph.microsoft.us/v1.0/me/todo/lists?$skiptoken=x");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("times out a hung request instead of hanging forever", async () => {
     const client = new GraphClient({ config, tokens, logger: silent, ids, requestTimeoutMs: 20, fetchImpl: hangingFetch(), sleep: noSleep });
     await expect(client.request("GET", "/me/todo/lists")).rejects.toMatchObject({ code: "graph_unavailable" });

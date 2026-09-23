@@ -64,6 +64,8 @@ export class GraphClient {
       try {
         res = await this.fetchImpl(url, {
           method,
+          // Never forward credentials to a destination selected by a redirect.
+          redirect: "manual",
           headers: {
             Authorization: `Bearer ${token}`,
             "client-request-id": clientRequestId,
@@ -134,7 +136,27 @@ export class GraphClient {
   }
 
   private buildUrl(pathOrUrl: string, query?: RequestOptions["query"]): string {
-    const url = new URL(pathOrUrl.startsWith("http") ? pathOrUrl : this.deps.config.graphBase + pathOrUrl);
+    let url: URL;
+    try {
+      const base = new URL(this.deps.config.graphBase);
+      url = pathOrUrl.startsWith("/")
+        ? new URL(this.deps.config.graphBase + pathOrUrl)
+        : new URL(pathOrUrl);
+      const todoRoot = `${base.pathname.replace(/\/+$/, "")}/me/todo`;
+      // Cursors and Graph nextLink values are untrusted. Check before acquiring a
+      // token, and constrain both the authority and API path (including escapes).
+      const decodedPath = decodeURIComponent(url.pathname);
+      const normalizedPath = new URL(decodedPath, base.origin).pathname;
+      if (
+        !["https:", "http:"].includes(base.protocol) ||
+        url.origin !== base.origin || url.username || url.password || url.hash ||
+        decodedPath.includes("\\") || /%[0-9a-f]{2}/i.test(decodedPath) ||
+        !(normalizedPath === todoRoot || normalizedPath.startsWith(`${todoRoot}/`))
+      ) throw new Error("Invalid destination");
+    } catch {
+      // Do not echo a caller-controlled URL (which can itself contain secrets).
+      throw new AppError("validation_error", "Graph requests must target the configured To Do API.");
+    }
     if (query) {
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) url.searchParams.set(key, String(value));
